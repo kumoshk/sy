@@ -1,0 +1,225 @@
+#!/usr/bin/env python3
+
+import subprocess, shlex, random, tempfile, os, sys, getpass;
+
+class Cryption:
+    def __init__(self):
+        self.d={};
+        self.d["gpg_path"]="gpg";
+        self.d["gpg_recipients"]=None;
+    def temp_uname(self, ext=None): #Do not delete this method; it isn't temporary
+        #Create a filename that will hopefully crash some hacker programs that try to access it.
+        tmp_filename="";
+        for x in range(random.randint(4,10)):
+            tmp_filename+=chr(random.randint(1113000, 1114111));
+        tmp_filename+=".";
+        for x in range(random.randint(1,10)):
+            tmp_filename+=chr(random.randint(1113000, 1114111));
+        if ext!=None:
+            if ext[0]!=".":
+                ext="."+ext;
+            tmp_filename+=ext;
+        return tmp_filename;
+        
+    def gpg_encrypt(self, filepath, passphrase=None, output=None, alg="AES256", hash="SHA512", compress_alg="BZIP2", compress_lvl="9", iterations="1000000", armor=True):
+        #This is for symmetric encryption.
+        filepath=os.path.expanduser(filepath);
+        if output!=None:
+            output=os.path.expanduser(output);
+        else:
+            output=os.path.join(os.getcwd(), os.path.basename(filepath)+".asc");
+        if armor==True:
+            armor="a";
+        else:
+            armor="";
+        #filepath=filepath.replace("'", "'\\''"); #This makes it so you can have apostrophes within single quotes.
+        #filepath=shlex.quote(filepath);
+        iterations=str(iterations);
+        compress_level="--compress-level "+compress_lvl;
+        if compress_alg.upper()=="BZIP2":
+            compress_level="--bzip2-compress-level "+compress_lvl;
+        result=None;
+        if passphrase==None:
+            passphrase=getpass.getpass("Please enter your passphrase: ");
+            repassphrase=getpass.getpass("Please re-enter your passphrase: ");
+            if passphrase!=repassphrase:
+                print("Your passphrases do not match. File not encrypted.");
+                return None;
+            elif passphrase==None:
+                print("File not encrypted.");
+                return None;
+        tmp_filename=self.temp_uname();
+        with tempfile.TemporaryDirectory() as DIR:
+            tmpfilepath=os.path.join(DIR, tmp_filename);
+            with open(tmpfilepath, "w") as FILE:
+                FILE.write(passphrase);
+            if output:
+                result=subprocess.Popen("cat "+tmpfilepath+"|"+self.d["gpg_path"]+" --batch --yes --passphrase-fd 0 --force-mdc --s2k-mode 3 --s2k-count "+iterations+" --s2k-cipher-algo "+alg+" --s2k-digest-algo "+hash+" --compress-algo='"+compress_alg+"' "+compress_level+" --output="+shlex.quote(output)+" -"+armor+"c "+shlex.quote(filepath), stdin=subprocess.PIPE, stderr=subprocess.STDOUT, stdout=subprocess.PIPE, shell=True).communicate()[0];
+            else:
+                result=subprocess.Popen("cat "+tmpfilepath+"|"+self.d["gpg_path"]+" --batch --yes --passphrase-fd 0 --force-mdc --s2k-mode 3 --s2k-count "+iterations+" --s2k-cipher-algo "+alg+" --s2k-digest-algo "+hash+" --compress-algo='"+compress_alg+"' --compress-level "+compress_lvl+" -"+armor+"c "+shlex.quote(filepath), stdin=subprocess.PIPE, stderr=subprocess.STDOUT, stdout=subprocess.PIPE, shell=True).communicate()[0];
+        return result.strip();
+    def gpg_encrypt_asymmetric(self, filepath, output=None, alg="AES256", hash="SHA512", compress_alg="BZIP2", compress_lvl="9", iterations="1000000", armor=True):
+        #This is for asymmetric encryption. No passphrase is required to encrypt (just to decrypt).
+        if armor==True:
+            armor="a";
+        else:
+            armor="";
+        #filepath=filepath.replace("'", "'\\''"); #This makes it so you can have apostrophes within single quotes.
+        iterations=str(iterations);
+        compress_level="--compress-level "+compress_lvl;
+        if compress_alg.upper()=="BZIP2":
+            compress_level="--bzip2-compress-level "+compress_lvl;
+        command=None;
+        recipients="";
+        for x in self.d["gpg_recipients"]:
+            recipients+="--recipient "+x+" ";
+        recipients=recipients.strip();
+        #&&&& Require trusted keys.
+        if output:
+            #command=r"""'%s' --batch --yes --force-mdc --s2k-mode 3 --s2k-count %s --s2k-cipher-algo %s --s2k-digest-algo %s --compress-algo='%s' %s --output='%s' -ae %s '%s'""" % (self.d["gpg_path"], iterations, alg, hash, compress_alg, compress_level, output, recipients, filepath);
+            command=shlex.split(self.d["gpg_path"]+" --batch --yes --force-mdc --s2k-mode 3 --s2k-count "+iterations+" --s2k-cipher-algo "+alg+" --s2k-digest-algo "+hash+" --compress-algo='"+compress_alg+"' "+compress_level+" --output="+shlex.quote(output)+" -"+armor+"e "+recipients+" "+shlex.quote(filepath));
+        else:
+            #command=r"""'%s' --batch --yes --force-mdc --s2k-mode 3 --s2k-count %s --s2k-cipher-algo %s --s2k-digest-algo %s --compress-algo='%s' %s -ae %s '%s'""" % (self.d["gpg_path"], iterations, alg, hash, compress_alg, compress_level, recipients, filepath);
+            command=shlex.split(self.d["gpg_path"]+" --batch --yes --force-mdc --s2k-mode 3 --s2k-count "+iterations+" --s2k-cipher-algo "+alg+" --s2k-digest-algo "+hash+" --compress-algo='"+compress_alg+"' --compress-level "+compress_lvl+" -"+armor+"e "+recipients+" "+shlex.quote(filepath));
+        #os.system(command);
+        #command=shlex.split(command);
+        #return "TBA";
+        result=subprocess.Popen(command, stderr=subprocess.PIPE).communicate()[1];
+        return result.strip();
+        #result=subprocess.call(command);
+        #return result;
+    def gpg_decrypt(self, filepath, passphrase=None, output=None):
+        #This is for both symmetric and asymmetric decryption.
+        filepath=os.path.expanduser(filepath);
+        if output!=None:
+            output=os.path.expanduser(output);
+        else:
+            fn=os.path.basename(filepath);
+            newfn=None;
+            if fn[-4:] in {".asc", ".gpg"}:
+                newfn=fn[:-4]; #The filename without .asc on the end.
+            if newfn==None:
+                output=os.path.join(os.getcwd(), os.path.basename(filepath)+".out");
+            else:
+                output=os.path.join(os.getcwd(), newfn);
+        def gpgsafe(filepath, rename=False): #Returns a filepath that doesn’t already exist that ends with .asc and optionally renames it.
+            fpcopy=filepath;
+            if fpcopy.endswith(".asc")==False and fpcopy.endswith(".gpg")==False:
+                while os.path.exists(fpcopy):
+                    fpcopy+=".asc";
+                if rename==True:
+                    #print("Renaming to", fpcopy);
+                    os.rename(filepath, fpcopy);
+            return fpcopy;
+        #gpgsafe_filepath=gpgsafe(filepath, rename=True);
+        try:
+            #filepath=filepath.replace("'", "'\\''");
+            result=None;
+            if passphrase==None:
+                if output:
+                    result=subprocess.Popen(self.d["gpg_path"]+" -d --batch --yes --use-agent --output="+shlex.quote(output)+" "+shlex.quote(filepath), shell=True, stderr=subprocess.STDOUT, stdout=subprocess.PIPE).communicate()[0];
+                else:
+                    result=subprocess.Popen(self.d["gpg_path"]+" -d --batch --yes --use-agent "+shlex.quote(filepath), shell=True, stderr=subprocess.STDOUT, stdout=subprocess.PIPE).communicate()[0];
+            else:
+                tmp_filename=self.temp_uname();
+                with tempfile.TemporaryDirectory() as DIR:
+                    tmpfilepath=os.path.join(DIR, tmp_filename);
+                    with open(tmpfilepath, "w") as FILE:
+                        FILE.write(passphrase);
+                    if output:
+                        result=subprocess.Popen("cat "+shlex.quote(tmpfilepath)+"|"+self.d["gpg_path"]+" -d --batch --yes --passphrase-fd 0 --output="+shlex.quote(output)+" "+shlex.quote(filepath), stdin=subprocess.PIPE, shell=True, stderr=subprocess.STDOUT, stdout=subprocess.PIPE).communicate()[0];
+                    else:
+                        result=subprocess.Popen("cat "+shlex.quote(tmpfilepath)+"|"+self.d["gpg_path"]+" -d --batch --yes --passphrase-fd 0 "+shlex.quote(filepath), stdin=subprocess.PIPE, shell=True, stderr=subprocess.STDOUT, stdout=subprocess.PIPE).communicate()[0];
+        finally:
+            #print("Renaming back to ", filepath);
+            #os.rename(gpgsafe_filepath, filepath);
+            pass;
+        result=not "decryption failed:" in str(result), str(result); #If it worked, return True. If not, return False.
+        if result[0]==True:
+            if output!=None:
+                print(f"`{filepath}` decrypted and saved to `{output}`.");
+            else:
+                print(f"`{filepath}` decrypted.");
+        else:
+            print(f"`{filepath}` not decrypted.");
+            print("result", result);
+        return result;
+    def gpg_enarmor(self, filepath, output=None):
+        #This is for asymmetric encryption. No passphrase is required to encrypt (just to decrypt).
+        #filepath=filepath.replace("'", "'\\''"); #This makes it so you can have apostrophes within single quotes.
+        filepath=shlex.quote(filepath);
+        command=None;
+        if output:
+            command=shlex.split(self.d["gpg_path"]+" --batch --yes --output="+shlex.quote(output)+" --enarmor "+filepath);
+        else:
+            command=shlex.split(self.d["gpg_path"]+" --batch --yes --enarmor "+filepath);
+        result=subprocess.Popen(command, stderr=subprocess.PIPE).communicate()[1];
+        return result.strip();
+    def gpg_dearmor(self, filepath, output=None):
+        #This just dearmors a file.
+        #filepath=filepath.replace("'", "'\\''");
+        filepath=shlex.quote(filepath);
+        command=None;
+        if output:
+            command=shlex.split(self.d["gpg_path"]+" --batch --yes --dearmor --output="+shlex.quote(output)+" "+filepath);
+        else:
+            command=shlex.split(self.d["gpg_path"]+" --batch --yes --dearmor "+filepath);
+        result=subprocess.Popen(command, stderr=subprocess.PIPE);
+        result=result.communicate()[1];
+        #(None, b'gpg: no valid OpenPGP data found.\n')
+        if "dearmor failed:" in str(result) or "no valid OpenPGP data found" in str(result):
+            return False;
+        else:
+            return True;
+
+c=Cryption();
+subprocess.run("echo RELOADAGENT|gpg-connect-agent", shell=True);
+if len(sys.argv)==3:
+    flag=sys.argv[1];
+    toCrypt=sys.argv[2];
+    if flag in {"d", "-d", "decrypt", "--decrypt"}:
+        print(f"Attempting to decrypt `{toCrypt}`.");
+        c.gpg_decrypt(filepath=toCrypt);
+        print("End.");
+    elif flag in {"e", "-e", "encrypt", "--encrypt"}:
+        print(f"Attempting to encrypt `{toCrypt}`.");
+        c.gpg_encrypt(filepath=toCrypt);
+        print("End.");
+    else:
+        print("You did not specify a valid flag.")
+elif len(sys.argv)==2:
+    #Don't use any flags if it's a directory (so it can tar or untar it).
+    print("FYI: No flags assumes you want to tar and encrypt a directory, or that you want to decrypt and untar a directory. Use flag `d` to decrypt a file or flag `e` to encrypt a file.");
+    toCrypt=sys.argv[1];
+    if toCrypt.endswith(".asc") or toCrypt.endswith(".gpg"): #Decrypt and untar
+        with tempfile.TemporaryDirectory() as DIR:
+            print(f"Attempting to decrypt `{toCrypt}`.");
+            gpgoutput=os.path.join(DIR, os.path.basename(toCrypt));
+            print("gpgoutput", gpgoutput);
+            c.gpg_decrypt(filepath=toCrypt, output=gpgoutput);
+            print("Attempting to untar.");
+            assert toCrypt.endswith(".tar.asc") or toCrypt.endswith(".tar.gpg");
+            finalName=toCrypt[:7];
+            runcmd=f"tar -xf {shlex.quote(gpgoutput)}";
+            print(runcmd);
+            subprocess.run(runcmd,shell=True);
+            print("End.");
+    else: #Tar and encrypt
+        #cwd=os.getcwd();
+        with tempfile.TemporaryDirectory() as DIR:
+            print("Making temporary tarfile.");
+            if toCrypt.endswith("/"):
+                toCrypt=toCrypt[:-1];
+            shlexTarCrypt=shlex.quote(os.path.join(DIR, toCrypt+".tar"));
+            runcmd=f"tar -cf {shlexTarCrypt} {shlex.quote(toCrypt)}";
+            #print(runcmd);
+            subprocess.run(runcmd,shell=True);
+            print("Temporary tarfile complete.");
+            print(f"Attempting to encrypt `{toCrypt}`.");
+            c.gpg_encrypt(filepath=os.path.join(DIR, toCrypt+".tar"), output=toCrypt+".tar.asc", armor=True);
+            print("End.");
+subprocess.run("echo RELOADAGENT|gpg-connect-agent", shell=True);
+#c.gpg_encrypt(filepath="~/test.py");
+#c.gpg_decrypt(filepath="~/temp/test.py.asc");
+
+    #def gpg_encrypt(self, filepath, passphrase, output=None, alg="AES256", hash="SHA512", compress_alg="BZIP2", compress_lvl="9", iterations="1000000", armor=True):

@@ -1,0 +1,4 @@
+#!/bin/bash
+
+crypt "$@"
+rclone sync "${@%/}".tar.asc db:sync
